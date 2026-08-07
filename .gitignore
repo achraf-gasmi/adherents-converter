@@ -1,0 +1,17 @@
+data/
+*.xlsx
+*.xls
+*.xlsm
+*.csv
+exports/
+output/
+__pycache__/
+*.pyc
+.venv/
+venv/
+env/
+.streamlit/secrets.toml
+.DS_Store
+.idea/
+.vscode/
+*.log

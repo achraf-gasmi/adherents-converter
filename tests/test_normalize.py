@@ -136,14 +136,41 @@ def test_est_ligne_fantome():
     assert est_ligne_fantome(None, "DURAND PIERRE", None, None) is False
 
 
-def test_deviner_gendre_masculin_et_feminin():
-    assert deviner_gendre("DUPONT MOHAMED") == "H"
-    assert deviner_gendre("DUPONT FATMA") == "F"
+def test_deviner_gendre_masculin_et_feminin_confiant():
+    resultat_h = deviner_gendre("DUPONT MOHAMED")
+    assert resultat_h.valeur == "H"
+    assert resultat_h.confiant is True
+
+    resultat_f = deviner_gendre("DUPONT FATMA")
+    assert resultat_f.valeur == "F"
+    assert resultat_f.confiant is True
 
 
-def test_deviner_gendre_inconnu_ou_vide():
-    assert deviner_gendre("DUPONT XYZABC") == ""
-    assert deviner_gendre("") == ""
+def test_deviner_gendre_prenom_compose_avant_dernier_mot():
+    # "MOHAMED" (avant-dernier mot) est reconnu même si "ALI" (dernier mot)
+    # ne l'est pas dans le dictionnaire.
+    resultat = deviner_gendre("DUPONT MOHAMED ALI")
+    assert resultat.valeur == "H"
+    assert resultat.confiant is True
+
+
+def test_deviner_gendre_jamais_vide_meme_sans_signal():
+    # Ni dictionnaire ni suffixe indicatif : repli sur la valeur par défaut,
+    # mais JAMAIS de chaîne vide (règle métier : la colonne Gendre ne doit
+    # jamais rester vide).
+    resultat = deviner_gendre("DUPONT XYZQWK")
+    assert resultat.valeur in ("H", "F")
+    assert resultat.confiant is False
+
+    resultat_vide = deviner_gendre("")
+    assert resultat_vide.valeur in ("H", "F")
+    assert resultat_vide.confiant is False
+
+
+def test_deviner_gendre_heuristique_suffixe_feminin():
+    resultat = deviner_gendre("DUPONT ZANOUBA")
+    assert resultat.valeur == "F"
+    assert resultat.confiant is False
 
 
 def test_resoudre_gendre_valeur_source_prioritaire():
@@ -158,7 +185,8 @@ def test_resoudre_gendre_deduit_du_prenom_quand_source_vide():
     assert resultat.code == "GENDRE_DEVINE"
 
 
-def test_resoudre_gendre_manquant_si_non_deductible():
-    resultat = resoudre_gendre(None, "DUPONT XYZABC")
-    assert resultat.valeur == ""
-    assert resultat.code == "GENDRE_MANQUANT"
+def test_resoudre_gendre_jamais_vide_meme_incertain():
+    resultat = resoudre_gendre(None, "DUPONT XYZQWK")
+    assert resultat.valeur in ("H", "F")
+    assert resultat.valeur != ""
+    assert resultat.code == "GENDRE_DEVINE_INCERTAIN"

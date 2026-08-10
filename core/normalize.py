@@ -62,53 +62,104 @@ def nom_ordre_suspect(nom_nettoye: str) -> bool:
     return premier in _PRENOMS_FREQUENTS and second not in _PRENOMS_FREQUENTS
 
 
-# Dictionnaires de prénoms fréquents genrés, utilisés en dernier recours pour
-# déduire le genre quand il est absent de la source (§5.6, décision métier
-# validée après retour utilisateurs : mieux vaut une valeur déduite et
-# signalée qu'une colonne vide). Un prénom présent dans les deux listes, ou
-# dans aucune, ne permet aucune déduction fiable -> le genre reste vide et
-# GENDRE_MANQUANT est journalisé comme avant.
+# Dictionnaires de prénoms fréquents genrés, utilisés pour déduire le genre
+# quand il est absent de la source (§5.6, décision métier validée après
+# retour utilisateurs : la colonne Gendre ne doit JAMAIS rester vide). Liste
+# volontairement large pour maximiser le taux de reconnaissance directe,
+# avant repli sur l'heuristique de suffixe puis sur une valeur par défaut
+# (voir deviner_gendre).
 _PRENOMS_MASCULINS = {
-    "MOHAMED", "AHMED", "KARIM", "SAMI", "NIZAR", "NABIL", "SAMIR", "RIADH",
-    "HICHEM", "WALID", "KHALED", "TAREK", "ZIED", "GHAZI", "MONCEF", "ADEL",
-    "YOUSSEF", "BILEL", "OUSSAMA", "RAYEN", "FIRAS", "ANIS", "HATEM", "IMED",
-    "SLIM", "FAOUZI", "KAIS", "MEHDI", "YASSINE", "AYMEN", "FEDI", "HAMZA",
-    "OMAR", "YASSER", "NIDHAL", "RIDHA", "BECHIR", "HABIB", "TAHER", "JAMEL",
-    "LOTFI", "NOUREDDINE", "SALAH", "ZOUHAIER", "CHOKRI", "MONGI", "FATHI",
-    "RACHID", "SOFIENE", "WASSIM", "BASSEM", "ANWAR", "ELYES", "SEIF",
-    "YOUNES", "ISKANDER", "AZIZ", "MEHREZ", "ABDELKARIM", "ABDERRAZEK",
+    "MOHAMED", "MOHAMMED", "AHMED", "KARIM", "SAMI", "NIZAR",
+    "NABIL", "SAMIR", "RIADH", "HICHEM", "WALID", "KHALED", "TAREK", "ZIED",
+    "GHAZI", "MONCEF", "ADEL", "YOUSSEF", "BILEL", "OUSSAMA", "RAYEN",
+    "FIRAS", "ANIS", "HATEM", "IMED", "SLIM", "FAOUZI", "KAIS", "MEHDI",
+    "YASSINE", "AYMEN", "FEDI", "HAMZA", "OMAR", "YASSER", "NIDHAL", "RIDHA",
+    "BECHIR", "HABIB", "TAHER", "JAMEL", "LOTFI", "NOUREDDINE", "SALAH",
+    "ZOUHAIER", "CHOKRI", "MONGI", "FATHI", "RACHID", "SOFIENE", "WASSIM",
+    "BASSEM", "ANWAR", "ELYES", "SEIF", "YOUNES", "ISKANDER", "AZIZ",
+    "MEHREZ", "ABDELKARIM", "ABDERRAZEK", "ALI", "AMOR", "BRAHIM", "IBRAHIM",
+    "ISMAIL", "ISSAM", "MAHER", "MAJDI", "MARWEN", "MAZEN", "MOEZ", "MOURAD",
+    "MUSTAPHA", "MOUSTAPHA", "NAOUFEL", "NIZAR", "OTHMAN", "RAMZI", "RAOUF",
+    "SAID", "SEIFEDDINE", "SKANDER", "SOUHAIL", "TAWFIK", "TOUFIK", "WAEL",
+    "WALEED", "ZAHER", "ZIAD", "ABDALLAH", "ABDESSATAR", "ABDESSALEM",
+    "ABDELAZIZ", "ABDELHAMID", "ABDELLATIF", "ADNEN", "AKRAM", "AMINE",
+    "AMMAR", "ANOUAR", "ARBI", "ASSAD", "AYOUB", "BADIS", "BILAL", "BOUBAKER",
+    "CHAKER", "CHEDLY", "DHIA", "DHAOU", "DRISS", "ELIES", "FARES", "FARID",
+    "FAROUK", "FERID", "FOUED", "GHASSEN", "HAFEDH", "HAITHEM", "HAMDI",
+    "HANI", "HAROUN", "HASSEN", "HATEM", "HEDI", "HELMI", "HOUCINE",
+    "HOUSSEM", "IHEB", "JALEL", "JAMEL", "JIHED", "KAMEL", "KHALIL",
+    "LASSAAD", "LOUAY", "MAKRAM", "MALEK", "MANSOUR", "MEDDEB", "MEHDI",
+    "MOKHTAR", "MONDHER", "MONEM", "NABIH", "NACEUR", "NADHIR", "NAJI",
+    "NEJI", "NIDAL", "NOOMEN", "OUSSEMA", "RABII", "RAED", "RAFIK",
+    "RAMI", "REDHA", "SAAD", "SABER", "SADOK", "SAHBI", "SALEM", "SAMEH",
+    "SAYFEDDINE", "SELIM", "SGHAIER", "SLAHEDDINE", "TAOUFIK", "WASSEF",
+    "YASSIN", "ZOUHAIER",
 }
 
 _PRENOMS_FEMININS = {
-    "FATMA", "RIM", "YASMINE", "IMEN", "SANA", "NADIA", "HELA", "EMNA",
-    "RANIA", "WIEM", "MERYEM", "AYA", "SIRINE", "MARWA", "INES", "DHOUHA",
-    "DORRA", "SALMA", "AMEL", "MOUNA", "HOUDA", "NAJET", "RADHIA", "NESRINE",
-    "MANEL", "AHLEM", "KHOULOUD", "SABRINE", "AMIRA", "NOUR", "MYRIAM",
-    "KHADIJA", "LAMIA", "SIHEM", "SAMIA", "NAWEL", "HAJER", "BOUTHEINA",
-    "RAOUDHA", "MERIAM", "ILHEM", "NAIMA", "SAWSEN", "ARWA", "SYRINE",
-    "SABRA", "FEIROUZ", "YOSRA", "GHADA", "ROUA",
+    "FATMA", "FATIMA", "RIM", "YASMINE", "IMEN", "SANA", "NADIA", "HELA",
+    "EMNA", "RANIA", "WIEM", "MERYEM", "AYA", "SIRINE", "SYRINE", "MARWA",
+    "INES", "DHOUHA", "DORRA", "SALMA", "AMEL", "MOUNA", "HOUDA", "NAJET",
+    "RADHIA", "NESRINE", "MANEL", "AHLEM", "KHOULOUD", "SABRINE", "AMIRA",
+    "NOUR", "MYRIAM", "KHADIJA", "LAMIA", "SIHEM", "SAMIA", "NAWEL", "HAJER",
+    "BOUTHEINA", "RAOUDHA", "MERIAM", "ILHEM", "NAIMA", "SAWSEN", "ARWA",
+    "SABRA", "FEIROUZ", "YOSRA", "GHADA", "ROUA", "AICHA", "ASMA", "ASMAA",
+    "AZZA", "BOCHRA", "CHIRAZ", "DALILA", "DONIA", "EYA", "FADWA", "FAIZA",
+    "FARAH", "FERDAOUS", "GHOFRANE", "HABIBA", "HANEN", "HAYFA", "HELMI",
+    "HIND", "HOURIA", "IBTISSEM", "IKRAM", "INTISSAR", "JIHENE", "JIHEN",
+    "KAOUTHER", "KENZA", "KHAWLA", "KHOULOUD", "LATIFA", "LEILA", "LINA",
+    "LOBNA", "LOUBNA", "MAHA", "MAISSA", "MALEK", "MARIEM", "MERVET",
+    "MOUNIRA", "NABILA", "NADRA", "NAWRES", "NEILA", "NEJIA", "NEJLA",
+    "NIHEL", "NOUHA", "OLA", "OLFA", "OUMAYMA", "RAJA", "RANDA", "RAWDHA",
+    "REJA", "REMLA", "RIHEM", "RIM", "SABRINE", "SALWA", "SANDA", "SENDA",
+    "SIWAR", "SOFIA", "SOUAD", "SOUHA", "SOUMAYA", "TASNIM", "TESNIM",
+    "WAFA", "WALA", "WIDED", "WISSAL", "YAKOUT", "YOMNA", "ZEINEB", "ZOHRA",
 }
 
+# Suffixes indicatifs (repli, faible confiance) quand le prénom n'est pas
+# reconnu dans les dictionnaires ci-dessus. Purement statistique : certains
+# prénoms masculins arabes se terminent aussi en "A" (ex. Mustapha, Yahya),
+# d'où la confiance marquée comme faible pour tout résultat obtenu ici.
+_SUFFIXES_FEMININS = ("IA", "YA", "OUA", "YET", "ETTE", "IYA", "A")
 
-def deviner_gendre(nom_nettoye: str) -> str:
-    """Déduit le genre H/F à partir du dernier mot du nom nettoyé (convention
-    "NOM Prénom" du format source), en le comparant aux prénoms fréquents
-    connus. Renvoie "" si le nom est vide, si le dernier mot n'est reconnu
-    dans aucune liste, ou s'il apparaît dans les deux (prénom mixte). Cette
-    déduction est toujours journalisée (GENDRE_DEVINE) pour rester auditable
-    et ne prime jamais sur une valeur de genre déjà présente dans la source.
+
+@dataclass
+class ResultatDeviner:
+    valeur: str  # H ou F, jamais vide
+    confiant: bool  # False si obtenu par heuristique de repli / valeur par défaut
+
+
+def deviner_gendre(nom_nettoye: str) -> ResultatDeviner:
+    """Déduit le genre H/F à partir du nom nettoyé (convention "NOM Prénom"
+    du format source). Ne renvoie jamais de valeur vide (§5.6, décision
+    métier : la colonne Gendre ne doit jamais rester vide) :
+
+    1. Dernier mot du nom comparé aux dictionnaires de prénoms fréquents.
+    2. À défaut, avant-dernier mot (prénoms composés, ex. "MOHAMED ALI").
+    3. À défaut, heuristique de suffixe (confiance faible).
+    4. À défaut (nom vide ou totalement non reconnaissable), valeur par
+       défaut "H" (confiance faible) — un choix arbitraire est nécessaire
+       pour ne jamais laisser le champ vide ; le cas est journalisé comme
+       tout résultat à faible confiance pour permettre une vérification
+       manuelle ciblée.
     """
     mots = nom_nettoye.split()
-    if not mots:
-        return ""
-    dernier = mots[-1].upper()
-    masculin = dernier in _PRENOMS_MASCULINS
-    feminin = dernier in _PRENOMS_FEMININS
-    if masculin and not feminin:
-        return "H"
-    if feminin and not masculin:
-        return "F"
-    return ""
+    candidats = [mots[-1].upper()] if mots else []
+    if len(mots) >= 2:
+        candidats.append(mots[-2].upper())
+
+    for candidat in candidats:
+        masculin = candidat in _PRENOMS_MASCULINS
+        feminin = candidat in _PRENOMS_FEMININS
+        if masculin and not feminin:
+            return ResultatDeviner("H", True)
+        if feminin and not masculin:
+            return ResultatDeviner("F", True)
+
+    dernier = candidats[0] if candidats else ""
+    if dernier.endswith(_SUFFIXES_FEMININS):
+        return ResultatDeviner("F", False)
+    return ResultatDeviner("H", False)
 
 
 # --------------------------------------------------------------------------
@@ -249,8 +300,9 @@ def parser_date(valeur: object) -> tuple[date | None, bool]:
 
 def normaliser_gendre(valeur: object) -> str:
     """Normalise le genre en H/F. Toute valeur non reconnue (y compris vide)
-    devient une chaîne vide ; c'est à l'appelant de journaliser
-    GENDRE_MANQUANT si la ligne le justifie."""
+    devient une chaîne vide ; c'est à l'appelant (resoudre_gendre) de
+    prendre le relais avec une déduction, la colonne Gendre ne devant
+    jamais rester vide en sortie (§5.6)."""
     if valeur is None:
         return ""
     texte = str(valeur).strip().upper()
@@ -263,28 +315,30 @@ def normaliser_gendre(valeur: object) -> str:
 
 @dataclass
 class ResultatGendre:
-    valeur: str  # "" si toujours indéterminé après déduction
-    code: str | None  # None si le genre était déjà présent dans la source
+    valeur: str  # H ou F : jamais vide, quelle que soit la source
+    code: str | None  # None si le genre était déjà présent (fiable) dans la source
 
 
 def resoudre_gendre(valeur_brute: object, nom_nettoye: str) -> ResultatGendre:
     """Détermine le genre à exporter : valeur source si présente, sinon
-    déduction automatique à partir du prénom (dernier mot du nom nettoyé,
-    §5.6 — décision métier validée après retour utilisateurs : le genre doit
-    toujours être rempli quand c'est possible, plutôt que laissé vide). Le
-    résultat porte toujours un code pour rester auditable : GENDRE_DEVINE si
-    la valeur a été déduite, GENDRE_MANQUANT si aucune déduction n'a été
-    possible.
+    déduction automatique à partir du prénom (§5.6 — décision métier validée
+    après retour utilisateurs : la colonne Gendre ne doit **jamais** rester
+    vide). Le résultat porte toujours un code pour rester auditable :
+    - None : genre déjà présent et fiable dans la source, rien à signaler.
+    - GENDRE_DEVINE : déduit avec confiance (prénom reconnu dans le
+      dictionnaire).
+    - GENDRE_DEVINE_INCERTAIN : déduit par heuristique de repli ou par
+      défaut faute de signal exploitable — la valeur est tout de même
+      renseignée, mais explicitement signalée comme incertaine pour
+      validation manuelle ciblée.
     """
     gendre = normaliser_gendre(valeur_brute)
     if gendre:
         return ResultatGendre(gendre, None)
 
     devine = deviner_gendre(nom_nettoye)
-    if devine:
-        return ResultatGendre(devine, "GENDRE_DEVINE")
-
-    return ResultatGendre("", "GENDRE_MANQUANT")
+    code = "GENDRE_DEVINE" if devine.confiant else "GENDRE_DEVINE_INCERTAIN"
+    return ResultatGendre(devine.valeur, code)
 
 
 # --------------------------------------------------------------------------

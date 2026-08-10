@@ -115,18 +115,19 @@ def _traiter_personne(
 
     resultat_gendre = resoudre_gendre(None, resultat[F_NOM])
     if resultat_gendre.code == "GENDRE_DEVINE":
+        dernier_mot = resultat[F_NOM].split()[-1] if resultat[F_NOM] else ""
         collecteur.ajouter(
             fichier_source=fichier, onglet_source=onglet, ligne_source=ligne_source,
             colonne_source="", code="GENDRE_DEVINE", num_famille=num_famille, nom=resultat[F_NOM],
             champ_cible="Gendre", valeur_origine=None, valeur_retenue=resultat_gendre.valeur,
-            message=f"Genre absent du format source V0 ; déduit du prénom (\"{resultat[F_NOM].split()[-1] if resultat[F_NOM] else ''}\") -> à valider.",
+            message=f"Genre absent du format source V0 ; déduit du prénom (\"{dernier_mot}\") -> à valider.",
         )
-    elif resultat_gendre.code == "GENDRE_MANQUANT":
+    elif resultat_gendre.code == "GENDRE_DEVINE_INCERTAIN":
         collecteur.ajouter(
             fichier_source=fichier, onglet_source=onglet, ligne_source=ligne_source,
-            colonne_source="", code="GENDRE_MANQUANT", num_famille=num_famille, nom=resultat[F_NOM],
-            champ_cible="Gendre", valeur_origine=None, valeur_retenue=None,
-            message="Genre absent du format source V0 et non déductible du prénom.",
+            colonne_source="", code="GENDRE_DEVINE_INCERTAIN", num_famille=num_famille, nom=resultat[F_NOM],
+            champ_cible="Gendre", valeur_origine=None, valeur_retenue=resultat_gendre.valeur,
+            message="Genre absent du format source V0 ; prénom non reconnu, valeur déduite par heuristique de secours -> à valider impérativement.",
         )
     resultat[F_GENDRE] = resultat_gendre.valeur
 

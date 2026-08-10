@@ -149,12 +149,12 @@ def convertir_v1(
                 champ_cible="Gendre", valeur_origine=gendre_brut, valeur_retenue=resultat_gendre.valeur,
                 message=f"Genre manquant dans la source ; déduit du prénom (\"{dernier_mot}\") -> à valider.",
             )
-        elif resultat_gendre.code == "GENDRE_MANQUANT":
+        elif resultat_gendre.code == "GENDRE_DEVINE_INCERTAIN":
             collecteur.ajouter(
                 fichier_source=nom_fichier, onglet_source=nom_onglet, ligne_source=ligne_source_num,
-                colonne_source=V1_COL_GENDRE, code="GENDRE_MANQUANT", num_famille=num_famille, nom=resultat[F_NOM],
-                champ_cible="Gendre", valeur_origine=gendre_brut, valeur_retenue=None,
-                message="Genre manquant ou non reconnu dans la source, et non déductible du prénom.",
+                colonne_source=V1_COL_GENDRE, code="GENDRE_DEVINE_INCERTAIN", num_famille=num_famille, nom=resultat[F_NOM],
+                champ_cible="Gendre", valeur_origine=gendre_brut, valeur_retenue=resultat_gendre.valeur,
+                message="Genre manquant ou non reconnu dans la source ; prénom non reconnu, valeur déduite par heuristique de secours -> à valider impérativement.",
             )
         resultat[F_GENDRE] = resultat_gendre.valeur
 

@@ -91,14 +91,16 @@ data/samples/               Fichiers Excel sources de référence
     rang ; `RANG_ENFANTS_DESORDONNES` : l'ordre des rangs des enfants ne
     suit pas leur âge ; `RANG_MANQUANT` : rang absent ou illisible, laissé
     vide), sans jamais modifier la valeur exportée.
-- **Genre** : si le genre est absent de la source (systématique en V0, ou
+- **Genre** : la colonne Gendre n'est **jamais laissée vide** (décision
+  métier). Si le genre est absent de la source (systématique en V0, ou
   ponctuel en V1), l'application le déduit automatiquement du prénom
-  (dernier mot du nom nettoyé) à partir d'un dictionnaire de prénoms
-  fréquents, et le renseigne dans la colonne Gendre. Toute valeur ainsi
-  déduite est journalisée en `GENDRE_DEVINE` (sévérité information, avec le
-  prénom utilisé pour la déduction) afin de rester auditable et vérifiable ;
-  quand aucune déduction fiable n'est possible, `GENDRE_MANQUANT` est
-  journalisé et le champ reste vide.
+  (dernier mot du nom nettoyé, puis avant-dernier mot pour les prénoms
+  composés) : d'abord par un dictionnaire de prénoms fréquents, puis, à
+  défaut, par une heuristique de suffixe, puis, en tout dernier recours, par
+  une valeur par défaut. Toute valeur déduite est journalisée pour rester
+  auditable : `GENDRE_DEVINE` (information) quand le prénom est reconnu avec
+  confiance, `GENDRE_DEVINE_INCERTAIN` (avertissement) quand la valeur
+  provient de l'heuristique de repli ou du défaut — à valider en priorité.
 - **CIN** : nettoyage des espaces (y compris insécables) et astérisques,
   rejet des booléens et motifs factices, complétion à 8 chiffres si 7
   chiffres présents. Un CIN vide n'est signalé que sur la ligne d'adhérent
@@ -121,9 +123,9 @@ Avertissement / Information) est défini dans `core/anomalies.py`.
 pas dans le format source V0 : les lignes issues de ce format (environ 72 %
 du corpus total) sortiront avec ces deux colonnes vides. Une reprise
 manuelle ou une demande de complément aux entreprises clientes est
-nécessaire pour les fiabiliser. Le Genre, lui, est déduit automatiquement du
-prénom quand c'est possible (voir plus haut) — les cas non déductibles
-restent vides et journalisés en `GENDRE_MANQUANT`.
+nécessaire pour les fiabiliser. Le Genre, lui, n'est jamais vide : il est
+systématiquement déduit du prénom (voir plus haut), avec un niveau de
+confiance journalisé (`GENDRE_DEVINE` ou `GENDRE_DEVINE_INCERTAIN`).
 
 **L2 — Qualité des CIN.** Une part significative des CIN du corpus est non
 conforme ou absente (complétés à 7 chiffres, invalides, ou factices). Les
@@ -143,11 +145,15 @@ lui, continue d'être entièrement calculé (le format source ne le porte pas).
 sont signalés mais jamais fusionnés : la décision appartient au métier.
 
 **L5 — Déduction du genre par prénom : une heuristique, pas une certitude.**
-Le dictionnaire de prénoms utilisé est volontairement générique et non
-exhaustif ; un prénom mixte, rare, ou absent du dictionnaire ne permet
-aucune déduction. Chaque valeur déduite est journalisée en `GENDRE_DEVINE`
-et doit être considérée comme une proposition à valider, jamais comme une
-certitude équivalente à une valeur fournie par la source.
+Le dictionnaire de prénoms utilisé est volontairement large mais non
+exhaustif. Quand le prénom n'y figure pas, une heuristique de suffixe prend
+le relais, et en dernier recours une valeur par défaut est retenue plutôt
+que de laisser la colonne vide (règle métier). Ces deux derniers cas sont
+journalisés en `GENDRE_DEVINE_INCERTAIN` (sévérité avertissement) et doivent
+être traités en priorité lors de la validation manuelle — contrairement à
+`GENDRE_DEVINE` (prénom reconnu avec confiance), qui reste malgré tout une
+proposition et non une certitude équivalente à une valeur fournie par la
+source.
 
 ## Vérification sur le corpus réel
 
@@ -161,9 +167,11 @@ référence :
   (HUTCHINSON, 8 personnes partageant par erreur le même N° Famille), gérée
   par la règle `ADHERENT_MULTIPLE` sans perte de données,
 - aucune collision de N° Famille entre fichiers différents,
-- 4 076 genres déduits automatiquement du prénom sur les 14 027 lignes qui en
-  étaient dépourvues (le reste, `GENDRE_MANQUANT`, correspond à des prénoms
-  absents du dictionnaire ou à des lignes sans nom exploitable),
+- 0 valeur vide dans la colonne Gendre sur les 19 534 lignes exportées : les
+  14 027 lignes qui en étaient dépourvues dans la source ont toutes été
+  complétées (7 707 par reconnaissance directe du prénom `GENDRE_DEVINE`,
+  6 320 par heuristique de repli ou valeur par défaut
+  `GENDRE_DEVINE_INCERTAIN`, à valider en priorité),
 - 8 familles avec rangs source dupliqués détectées et journalisées
   (`RANG_DUPLIQUE`), conforme à l'audit initial des données ; ces rangs sont
   désormais conservés tels quels dans l'export plutôt que recalculés,

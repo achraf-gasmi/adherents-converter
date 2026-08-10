@@ -153,7 +153,7 @@ class Anomalie:
             self.nom,
             self.champ_cible,
             formater_valeur_origine(self.valeur_origine),
-            "" if self.valeur_retenue is None else self.valeur_retenue,
+            "" if self.valeur_retenue is None else str(self.valeur_retenue),
             self.message,
         ]
 

@@ -77,20 +77,35 @@ def test_num_famille_uniques_entre_fichiers(resultat_corpus):
     assert not any(a.code == "COLLISION_NUM_FAMILLE" for a in collecteur.anomalies)
 
 
-def test_aucune_famille_avec_rangs_dupliques(resultat_corpus):
-    lignes, _, _ = resultat_corpus
-    par_famille: dict[tuple, list[int]] = {}
+def test_rangs_dupliques_toujours_flagues(resultat_corpus):
+    # Depuis la décision métier de ne plus corriger le rang source (V1), des
+    # doublons de rang peuvent exister dans l'export : ils doivent toujours
+    # être journalisés en RANG_DUPLIQUE, jamais silencieusement laissés tels
+    # quels sans trace.
+    lignes, collecteur, _ = resultat_corpus
+    par_famille: dict[tuple, list[dict]] = {}
     for l in lignes:
         cle = (l[F_FICHIER_SOURCE], l[F_ONGLET_SOURCE], l[F_NUM_FAMILLE])
         if l[F_RANG] is not None:
-            par_famille.setdefault(cle, []).append(l[F_RANG])
-    for rangs in par_famille.values():
-        assert len(rangs) == len(set(rangs))
+            par_famille.setdefault(cle, []).append(l)
+    familles_avec_doublon = 0
+    for membres in par_famille.values():
+        rangs = [m[F_RANG] for m in membres]
+        if len(rangs) != len(set(rangs)):
+            familles_avec_doublon += 1
+    nb_anomalies_doublon = sum(1 for a in collecteur.anomalies if a.code == "RANG_DUPLIQUE")
+    assert (familles_avec_doublon > 0) == (nb_anomalies_doublon > 0)
 
 
-def test_rang_1_toujours_conjoint(resultat_corpus):
-    lignes, _, _ = resultat_corpus
-    assert all(l[F_LIEN] == LIEN_CONJOINT for l in lignes if l[F_RANG] == 1)
+def test_rang_1_non_conjoint_toujours_flague(resultat_corpus):
+    # Le rang source n'est plus corrigé : un rang 1 porté par une ligne qui
+    # n'est pas le conjoint peut désormais apparaître dans l'export, mais
+    # doit alors être signalé en RANG_INCOHERENT.
+    lignes, collecteur, _ = resultat_corpus
+    lignes_rang1_incoherentes = [l for l in lignes if l[F_RANG] == 1 and l[F_LIEN] != LIEN_CONJOINT]
+    nb_anomalies = sum(1 for a in collecteur.anomalies if a.code == "RANG_INCOHERENT")
+    if lignes_rang1_incoherentes:
+        assert nb_anomalies > 0
 
 
 def test_champs_rang0_uniquement(resultat_corpus):

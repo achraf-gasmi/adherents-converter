@@ -76,12 +76,14 @@ def test_ligne_fantome_conservee_si_option_desactivee():
     assert len(resultats) == 2
 
 
-def test_rang_source_incoherent_signale_apres_recalcul():
+def test_rang_source_conserve_tel_quel_et_incoherence_signalee():
+    # Décision métier : le rang fourni par la source n'est plus corrigé, il
+    # est conservé tel quel dans l'export ; seule une anomalie est journalisée.
     lignes = [
         _ligne("F1", 5, "Adhérent", "ADH", datetime(1980, 1, 1)),
     ]
     collecteur = CollecteurAnomalies()
     resultats = convertir_v1(lignes, EN_TETES_NOYAU, "TEST.xlsx", "Sheet1", collecteur)
     calculer_rangs(resultats, collecteur)
-    assert any(a.code == "RANG_RECALCULE" for a in collecteur.anomalies)
-    assert resultats[0]["rang"] == 0
+    assert any(a.code == "RANG_INCOHERENT" for a in collecteur.anomalies)
+    assert resultats[0]["rang"] == 5

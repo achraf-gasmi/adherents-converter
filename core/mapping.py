@@ -65,13 +65,14 @@ F_ONGLET_SOURCE = "_onglet_source"
 F_LIGNE_SOURCE = "_ligne_source"
 F_COLONNE_SOURCE = "_colonne_source"
 F_INDEX_SOURCE = "_index_source"
-F_RANG_SOURCE = "_rang_source"  # Rang tel que fourni par la source V1 (jamais réutilisé, seulement comparé)
+F_RANG_SOURCE = "_rang_source"  # Rang brut tel que fourni par la source (V1 uniquement ; jamais modifié)
+F_VERSION_SOURCE = "_version_source"  # "V0" ou "V1" : pilote le mode de calcul du rang
 
 INTERNAL_FIELDS = [
     F_CLIENT, F_NUM_FAMILLE, F_LIEN, F_GENDRE, F_NOM, F_DATE_NAISSANCE,
     F_DATE_AFFILIATION, F_RANG, F_RIB, F_CIN,
     F_FICHIER_SOURCE, F_ONGLET_SOURCE, F_LIGNE_SOURCE, F_COLONNE_SOURCE,
-    F_INDEX_SOURCE, F_RANG_SOURCE,
+    F_INDEX_SOURCE, F_RANG_SOURCE, F_VERSION_SOURCE,
 ]
 
 # --------------------------------------------------------------------------
@@ -88,6 +89,12 @@ LIEN_ENFANT = "Enfant"
 
 SIGNATURE_V0 = "MATRICULE_SOCIETE"
 SIGNATURE_V1 = "Client"
+
+# Identifiants de version, partagés par detection.py, convert_v0.py,
+# convert_v1.py et ranking.py (ce dernier en a besoin pour savoir s'il doit
+# conserver le rang source tel quel (V1) ou le calculer entièrement (V0)).
+VERSION_V0 = "V0"
+VERSION_V1 = "V1"
 
 # --------------------------------------------------------------------------
 # Format V0 — colonnes sources (§2)

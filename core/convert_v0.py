@@ -15,12 +15,15 @@ from core.mapping import (
     F_CIN, F_CLIENT, F_COLONNE_SOURCE, F_DATE_AFFILIATION, F_DATE_NAISSANCE,
     F_FICHIER_SOURCE, F_GENDRE, F_INDEX_SOURCE, F_LIEN, F_LIGNE_SOURCE,
     F_NOM, F_NUM_FAMILLE, F_ONGLET_SOURCE, F_RANG, F_RANG_SOURCE, F_RIB,
-    LIEN_ADHERENT, LIEN_CONJOINT, LIEN_ENFANT, V0_COL_ADHERENT, V0_COL_CIN,
-    V0_COL_CLIENT, V0_COL_CONJOINT, V0_COL_DATE_NAISS, V0_COL_DATE_NAISS_CONJ,
-    V0_COL_IMAGE, V0_COL_NUM_FAMILLE, V0_NB_ENFANTS_MAX, construire_index_entetes,
-    normaliser_entete, v0_col_date_naiss_enfant, v0_col_enfant,
+    F_VERSION_SOURCE, LIEN_ADHERENT, LIEN_CONJOINT, LIEN_ENFANT,
+    V0_COL_ADHERENT, V0_COL_CIN, V0_COL_CLIENT, V0_COL_CONJOINT,
+    V0_COL_DATE_NAISS, V0_COL_DATE_NAISS_CONJ, V0_COL_IMAGE, V0_COL_NUM_FAMILLE,
+    V0_NB_ENFANTS_MAX, VERSION_V0, construire_index_entetes, normaliser_entete,
+    v0_col_date_naiss_enfant, v0_col_enfant,
 )
-from core.normalize import nettoyer_cin, nettoyer_nom, nom_ordre_suspect, parser_date
+from core.normalize import (
+    nettoyer_cin, nettoyer_nom, nom_ordre_suspect, parser_date, resoudre_gendre,
+)
 
 
 def _valeur(ligne: tuple, index: dict[str, int], colonne: str) -> object:
@@ -42,6 +45,7 @@ def _nouvelle_ligne(fichier: str, onglet: str, ligne_source: int, client: str, n
         F_COLONNE_SOURCE: "",
         F_INDEX_SOURCE: 0,
         F_RANG_SOURCE: None,
+        F_VERSION_SOURCE: VERSION_V0,
         F_CLIENT: client,
         F_NUM_FAMILLE: num_famille,
         F_LIEN: "",
@@ -109,12 +113,22 @@ def _traiter_personne(
         )
     resultat[F_DATE_NAISSANCE] = date_naissance
 
-    collecteur.ajouter(
-        fichier_source=fichier, onglet_source=onglet, ligne_source=ligne_source,
-        colonne_source="", code="GENDRE_MANQUANT", num_famille=num_famille, nom=resultat[F_NOM],
-        champ_cible="Gendre", valeur_origine=None, valeur_retenue=None,
-        message="Le genre n'existe pas dans le format source V0.",
-    )
+    resultat_gendre = resoudre_gendre(None, resultat[F_NOM])
+    if resultat_gendre.code == "GENDRE_DEVINE":
+        collecteur.ajouter(
+            fichier_source=fichier, onglet_source=onglet, ligne_source=ligne_source,
+            colonne_source="", code="GENDRE_DEVINE", num_famille=num_famille, nom=resultat[F_NOM],
+            champ_cible="Gendre", valeur_origine=None, valeur_retenue=resultat_gendre.valeur,
+            message=f"Genre absent du format source V0 ; déduit du prénom (\"{resultat[F_NOM].split()[-1] if resultat[F_NOM] else ''}\") -> à valider.",
+        )
+    elif resultat_gendre.code == "GENDRE_MANQUANT":
+        collecteur.ajouter(
+            fichier_source=fichier, onglet_source=onglet, ligne_source=ligne_source,
+            colonne_source="", code="GENDRE_MANQUANT", num_famille=num_famille, nom=resultat[F_NOM],
+            champ_cible="Gendre", valeur_origine=None, valeur_retenue=None,
+            message="Genre absent du format source V0 et non déductible du prénom.",
+        )
+    resultat[F_GENDRE] = resultat_gendre.valeur
 
     return resultat
 

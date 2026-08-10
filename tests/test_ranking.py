@@ -5,19 +5,26 @@ from core.mapping import (
     F_CIN, F_CLIENT, F_COLONNE_SOURCE, F_DATE_AFFILIATION, F_DATE_NAISSANCE,
     F_FICHIER_SOURCE, F_GENDRE, F_INDEX_SOURCE, F_LIEN, F_LIGNE_SOURCE,
     F_NOM, F_NUM_FAMILLE, F_ONGLET_SOURCE, F_RANG, F_RANG_SOURCE, F_RIB,
-    LIEN_ADHERENT, LIEN_CONJOINT, LIEN_ENFANT,
+    F_VERSION_SOURCE, LIEN_ADHERENT, LIEN_CONJOINT, LIEN_ENFANT, VERSION_V0,
+    VERSION_V1,
 )
 from core.ranking import calculer_rangs
 
 
-def _ligne(lien, nom, naissance, num_famille="F1", index_source=0, fichier="X.xlsx", onglet="Feuille1"):
+def _ligne(lien, nom, naissance, num_famille="F1", index_source=0, fichier="X.xlsx",
+           onglet="Feuille1", version=VERSION_V0, rang_source=None):
     return {
         F_FICHIER_SOURCE: fichier, F_ONGLET_SOURCE: onglet, F_LIGNE_SOURCE: 2,
-        F_COLONNE_SOURCE: "", F_INDEX_SOURCE: index_source, F_RANG_SOURCE: None,
+        F_COLONNE_SOURCE: "", F_INDEX_SOURCE: index_source, F_RANG_SOURCE: rang_source,
+        F_VERSION_SOURCE: version,
         F_CLIENT: "CLIENT", F_NUM_FAMILLE: num_famille, F_LIEN: lien, F_GENDRE: "",
         F_NOM: nom, F_DATE_NAISSANCE: naissance, F_DATE_AFFILIATION: None,
         F_RANG: None, F_RIB: "", F_CIN: "",
     }
+
+
+def _ligne_v1(lien, nom, naissance, rang_source, **kwargs):
+    return _ligne(lien, nom, naissance, version=VERSION_V1, rang_source=rang_source, **kwargs)
 
 
 def test_tri_enfants_par_date():
@@ -132,3 +139,76 @@ def test_date_future():
     collecteur = CollecteurAnomalies()
     calculer_rangs(lignes, collecteur, date_reference=date(2026, 1, 1))
     assert any(a.code == "DATE_FUTURE" for a in collecteur.anomalies)
+
+
+# --------------------------------------------------------------------------
+# V1 : le rang source n'est plus corrigé, seulement contrôlé et signalé
+# (décision métier validée après retour des utilisateurs).
+# --------------------------------------------------------------------------
+
+def test_v1_rang_source_toujours_conserve_meme_incoherent():
+    lignes = [
+        _ligne_v1(LIEN_ADHERENT, "PERE", date(1980, 1, 1), rang_source=7),
+        _ligne_v1(LIEN_CONJOINT, "MERE", date(1982, 1, 1), rang_source=1, index_source=1),
+        _ligne_v1(LIEN_ENFANT, "ENFANT", date(2010, 1, 1), rang_source=9, index_source=2),
+    ]
+    collecteur = CollecteurAnomalies()
+    calculer_rangs(lignes, collecteur, date_reference=date(2026, 1, 1))
+    par_nom = {l[F_NOM]: l[F_RANG] for l in lignes}
+    # Les rangs source sont repris tels quels, y compris l'incohérence de PERE.
+    assert par_nom["PERE"] == 7
+    assert par_nom["MERE"] == 1
+    assert par_nom["ENFANT"] == 9
+    assert any(a.code == "RANG_INCOHERENT" for a in collecteur.anomalies)
+
+
+def test_v1_rangs_dupliques_conserves_et_signales():
+    lignes = [
+        _ligne_v1(LIEN_ADHERENT, "PERE", date(1980, 1, 1), rang_source=0),
+        _ligne_v1(LIEN_ENFANT, "ENFANT_A", date(2005, 1, 1), rang_source=2, index_source=1),
+        _ligne_v1(LIEN_ENFANT, "ENFANT_B", date(2008, 1, 1), rang_source=2, index_source=2),
+    ]
+    collecteur = CollecteurAnomalies()
+    calculer_rangs(lignes, collecteur, date_reference=date(2026, 1, 1))
+    par_nom = {l[F_NOM]: l[F_RANG] for l in lignes}
+    assert par_nom["ENFANT_A"] == 2
+    assert par_nom["ENFANT_B"] == 2
+    codes = [a.code for a in collecteur.anomalies]
+    assert codes.count("RANG_DUPLIQUE") == 2
+
+
+def test_v1_rang_manquant_laisse_vide_et_signale():
+    lignes = [
+        _ligne_v1(LIEN_ADHERENT, "PERE", date(1980, 1, 1), rang_source=None),
+    ]
+    collecteur = CollecteurAnomalies()
+    calculer_rangs(lignes, collecteur, date_reference=date(2026, 1, 1))
+    assert lignes[0][F_RANG] is None
+    assert any(a.code == "RANG_MANQUANT" for a in collecteur.anomalies)
+
+
+def test_v1_enfants_desordonnes_conserves_et_signales():
+    lignes = [
+        _ligne_v1(LIEN_ADHERENT, "PERE", date(1980, 1, 1), rang_source=0),
+        # L'aîné (né en 2002) porte un rang supérieur au cadet (né en 2008) :
+        # incohérent avec l'âge, mais conservé tel quel.
+        _ligne_v1(LIEN_ENFANT, "AINE", date(2002, 1, 1), rang_source=3, index_source=1),
+        _ligne_v1(LIEN_ENFANT, "CADET", date(2008, 1, 1), rang_source=2, index_source=2),
+    ]
+    collecteur = CollecteurAnomalies()
+    calculer_rangs(lignes, collecteur, date_reference=date(2026, 1, 1))
+    par_nom = {l[F_NOM]: l[F_RANG] for l in lignes}
+    assert par_nom["AINE"] == 3
+    assert par_nom["CADET"] == 2
+    assert any(a.code == "RANG_ENFANTS_DESORDONNES" for a in collecteur.anomalies)
+
+
+def test_v1_ordre_enfants_coherent_aucune_anomalie_desordre():
+    lignes = [
+        _ligne_v1(LIEN_ADHERENT, "PERE", date(1980, 1, 1), rang_source=0),
+        _ligne_v1(LIEN_ENFANT, "AINE", date(2002, 1, 1), rang_source=2, index_source=1),
+        _ligne_v1(LIEN_ENFANT, "CADET", date(2008, 1, 1), rang_source=3, index_source=2),
+    ]
+    collecteur = CollecteurAnomalies()
+    calculer_rangs(lignes, collecteur, date_reference=date(2026, 1, 1))
+    assert not any(a.code == "RANG_ENFANTS_DESORDONNES" for a in collecteur.anomalies)

@@ -1,8 +1,8 @@
 from datetime import date
 
 from core.normalize import (
-    est_ligne_fantome, nettoyer_cin, nettoyer_nom, nettoyer_rib,
-    normaliser_gendre, parser_date,
+    deviner_gendre, est_ligne_fantome, nettoyer_cin, nettoyer_nom,
+    nettoyer_rib, normaliser_gendre, parser_date, resoudre_gendre,
 )
 
 
@@ -134,3 +134,31 @@ def test_est_ligne_fantome():
     assert est_ligne_fantome(None, None, None, None) is True
     assert est_ligne_fantome("Adhérent", None, None, None) is False
     assert est_ligne_fantome(None, "DURAND PIERRE", None, None) is False
+
+
+def test_deviner_gendre_masculin_et_feminin():
+    assert deviner_gendre("DUPONT MOHAMED") == "H"
+    assert deviner_gendre("DUPONT FATMA") == "F"
+
+
+def test_deviner_gendre_inconnu_ou_vide():
+    assert deviner_gendre("DUPONT XYZABC") == ""
+    assert deviner_gendre("") == ""
+
+
+def test_resoudre_gendre_valeur_source_prioritaire():
+    resultat = resoudre_gendre("F", "DUPONT MOHAMED")
+    assert resultat.valeur == "F"
+    assert resultat.code is None
+
+
+def test_resoudre_gendre_deduit_du_prenom_quand_source_vide():
+    resultat = resoudre_gendre(None, "DUPONT MOHAMED")
+    assert resultat.valeur == "H"
+    assert resultat.code == "GENDRE_DEVINE"
+
+
+def test_resoudre_gendre_manquant_si_non_deductible():
+    resultat = resoudre_gendre(None, "DUPONT XYZABC")
+    assert resultat.valeur == ""
+    assert resultat.code == "GENDRE_MANQUANT"

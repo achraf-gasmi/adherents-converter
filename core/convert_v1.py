@@ -7,9 +7,11 @@ les colonnes surnuméraires varient selon le fichier (5 variantes, 12 à 16
 colonnes) et sont purement ignorées. Le lecteur tolère les en-têtes
 dupliqués (benetton, esol : "Date de radiation" x2) grâce à
 `construire_index_entetes`, qui ne retient que la première occurrence.
-Le Rang source est conservé à titre indicatif (F_RANG_SOURCE) pour être
-comparé au rang recalculé par core.ranking, mais n'est jamais réutilisé tel
-quel (§4, note sur la fiabilité du rang source).
+Le Rang source (F_RANG_SOURCE) est repris tel quel dans le rang exporté par
+core.ranking — décision métier validée après retour utilisateurs : le rang
+fourni par la source ne doit plus être corrigé, seulement contrôlé et
+signalé en cas d'incohérence (famille sans adhérent, rangs dupliqués,
+enfants désordonnés...).
 """
 from __future__ import annotations
 
@@ -18,14 +20,14 @@ from core.mapping import (
     F_CIN, F_CLIENT, F_COLONNE_SOURCE, F_DATE_AFFILIATION, F_DATE_NAISSANCE,
     F_FICHIER_SOURCE, F_GENDRE, F_INDEX_SOURCE, F_LIEN, F_LIGNE_SOURCE,
     F_NOM, F_NUM_FAMILLE, F_ONGLET_SOURCE, F_RANG, F_RANG_SOURCE, F_RIB,
-    LIEN_ADHERENT, V1_COL_CIN, V1_COL_CLIENT, V1_COL_DATE_AFFILIATION,
-    V1_COL_DATE_NAISSANCE, V1_COL_GENDRE, V1_COL_LIEN, V1_COL_NOM,
-    V1_COL_NUM_FAMILLE, V1_COL_RANG, V1_COL_RIB, construire_index_entetes,
-    normaliser_entete, normaliser_lien,
+    F_VERSION_SOURCE, LIEN_ADHERENT, V1_COL_CIN, V1_COL_CLIENT,
+    V1_COL_DATE_AFFILIATION, V1_COL_DATE_NAISSANCE, V1_COL_GENDRE,
+    V1_COL_LIEN, V1_COL_NOM, V1_COL_NUM_FAMILLE, V1_COL_RANG, V1_COL_RIB,
+    VERSION_V1, construire_index_entetes, normaliser_entete, normaliser_lien,
 )
 from core.normalize import (
     est_ligne_fantome, nettoyer_cin, nettoyer_nom, nettoyer_rib,
-    nom_ordre_suspect, normaliser_gendre, parser_date,
+    nom_ordre_suspect, parser_date, resoudre_gendre,
 )
 
 
@@ -87,6 +89,7 @@ def convertir_v1(
             F_COLONNE_SOURCE: "",
             F_INDEX_SOURCE: position,
             F_RANG_SOURCE: rang_brut,
+            F_VERSION_SOURCE: VERSION_V1,
             F_CLIENT: client,
             F_NUM_FAMILLE: num_famille,
             F_LIEN: lien_brut if lien_brut is not None else "",
@@ -137,15 +140,23 @@ def convertir_v1(
         resultat[F_DATE_NAISSANCE] = date_naissance
 
         gendre_brut = _valeur(ligne, index, V1_COL_GENDRE)
-        gendre = normaliser_gendre(gendre_brut)
-        if gendre == "":
+        resultat_gendre = resoudre_gendre(gendre_brut, resultat[F_NOM])
+        if resultat_gendre.code == "GENDRE_DEVINE":
+            dernier_mot = resultat[F_NOM].split()[-1] if resultat[F_NOM] else ""
+            collecteur.ajouter(
+                fichier_source=nom_fichier, onglet_source=nom_onglet, ligne_source=ligne_source_num,
+                colonne_source=V1_COL_GENDRE, code="GENDRE_DEVINE", num_famille=num_famille, nom=resultat[F_NOM],
+                champ_cible="Gendre", valeur_origine=gendre_brut, valeur_retenue=resultat_gendre.valeur,
+                message=f"Genre manquant dans la source ; déduit du prénom (\"{dernier_mot}\") -> à valider.",
+            )
+        elif resultat_gendre.code == "GENDRE_MANQUANT":
             collecteur.ajouter(
                 fichier_source=nom_fichier, onglet_source=nom_onglet, ligne_source=ligne_source_num,
                 colonne_source=V1_COL_GENDRE, code="GENDRE_MANQUANT", num_famille=num_famille, nom=resultat[F_NOM],
                 champ_cible="Gendre", valeur_origine=gendre_brut, valeur_retenue=None,
-                message="Genre manquant ou non reconnu dans la source.",
+                message="Genre manquant ou non reconnu dans la source, et non déductible du prénom.",
             )
-        resultat[F_GENDRE] = gendre
+        resultat[F_GENDRE] = resultat_gendre.valeur
 
         # Est-ce la ligne d'adhérent ? Approximation au moment de la lecture
         # (avant recalcul définitif du rang par core.ranking), utilisée

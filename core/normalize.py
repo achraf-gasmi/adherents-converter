@@ -62,6 +62,55 @@ def nom_ordre_suspect(nom_nettoye: str) -> bool:
     return premier in _PRENOMS_FREQUENTS and second not in _PRENOMS_FREQUENTS
 
 
+# Dictionnaires de prénoms fréquents genrés, utilisés en dernier recours pour
+# déduire le genre quand il est absent de la source (§5.6, décision métier
+# validée après retour utilisateurs : mieux vaut une valeur déduite et
+# signalée qu'une colonne vide). Un prénom présent dans les deux listes, ou
+# dans aucune, ne permet aucune déduction fiable -> le genre reste vide et
+# GENDRE_MANQUANT est journalisé comme avant.
+_PRENOMS_MASCULINS = {
+    "MOHAMED", "AHMED", "KARIM", "SAMI", "NIZAR", "NABIL", "SAMIR", "RIADH",
+    "HICHEM", "WALID", "KHALED", "TAREK", "ZIED", "GHAZI", "MONCEF", "ADEL",
+    "YOUSSEF", "BILEL", "OUSSAMA", "RAYEN", "FIRAS", "ANIS", "HATEM", "IMED",
+    "SLIM", "FAOUZI", "KAIS", "MEHDI", "YASSINE", "AYMEN", "FEDI", "HAMZA",
+    "OMAR", "YASSER", "NIDHAL", "RIDHA", "BECHIR", "HABIB", "TAHER", "JAMEL",
+    "LOTFI", "NOUREDDINE", "SALAH", "ZOUHAIER", "CHOKRI", "MONGI", "FATHI",
+    "RACHID", "SOFIENE", "WASSIM", "BASSEM", "ANWAR", "ELYES", "SEIF",
+    "YOUNES", "ISKANDER", "AZIZ", "MEHREZ", "ABDELKARIM", "ABDERRAZEK",
+}
+
+_PRENOMS_FEMININS = {
+    "FATMA", "RIM", "YASMINE", "IMEN", "SANA", "NADIA", "HELA", "EMNA",
+    "RANIA", "WIEM", "MERYEM", "AYA", "SIRINE", "MARWA", "INES", "DHOUHA",
+    "DORRA", "SALMA", "AMEL", "MOUNA", "HOUDA", "NAJET", "RADHIA", "NESRINE",
+    "MANEL", "AHLEM", "KHOULOUD", "SABRINE", "AMIRA", "NOUR", "MYRIAM",
+    "KHADIJA", "LAMIA", "SIHEM", "SAMIA", "NAWEL", "HAJER", "BOUTHEINA",
+    "RAOUDHA", "MERIAM", "ILHEM", "NAIMA", "SAWSEN", "ARWA", "SYRINE",
+    "SABRA", "FEIROUZ", "YOSRA", "GHADA", "ROUA",
+}
+
+
+def deviner_gendre(nom_nettoye: str) -> str:
+    """Déduit le genre H/F à partir du dernier mot du nom nettoyé (convention
+    "NOM Prénom" du format source), en le comparant aux prénoms fréquents
+    connus. Renvoie "" si le nom est vide, si le dernier mot n'est reconnu
+    dans aucune liste, ou s'il apparaît dans les deux (prénom mixte). Cette
+    déduction est toujours journalisée (GENDRE_DEVINE) pour rester auditable
+    et ne prime jamais sur une valeur de genre déjà présente dans la source.
+    """
+    mots = nom_nettoye.split()
+    if not mots:
+        return ""
+    dernier = mots[-1].upper()
+    masculin = dernier in _PRENOMS_MASCULINS
+    feminin = dernier in _PRENOMS_FEMININS
+    if masculin and not feminin:
+        return "H"
+    if feminin and not masculin:
+        return "F"
+    return ""
+
+
 # --------------------------------------------------------------------------
 # CIN / Identité gouvernementale (§5.3)
 # --------------------------------------------------------------------------
@@ -210,6 +259,32 @@ def normaliser_gendre(valeur: object) -> str:
     if texte == "F":
         return "F"
     return ""
+
+
+@dataclass
+class ResultatGendre:
+    valeur: str  # "" si toujours indéterminé après déduction
+    code: str | None  # None si le genre était déjà présent dans la source
+
+
+def resoudre_gendre(valeur_brute: object, nom_nettoye: str) -> ResultatGendre:
+    """Détermine le genre à exporter : valeur source si présente, sinon
+    déduction automatique à partir du prénom (dernier mot du nom nettoyé,
+    §5.6 — décision métier validée après retour utilisateurs : le genre doit
+    toujours être rempli quand c'est possible, plutôt que laissé vide). Le
+    résultat porte toujours un code pour rester auditable : GENDRE_DEVINE si
+    la valeur a été déduite, GENDRE_MANQUANT si aucune déduction n'a été
+    possible.
+    """
+    gendre = normaliser_gendre(valeur_brute)
+    if gendre:
+        return ResultatGendre(gendre, None)
+
+    devine = deviner_gendre(nom_nettoye)
+    if devine:
+        return ResultatGendre(devine, "GENDRE_DEVINE")
+
+    return ResultatGendre("", "GENDRE_MANQUANT")
 
 
 # --------------------------------------------------------------------------

@@ -18,12 +18,10 @@ import openpyxl
 from core.mapping import (
     LIEN_ADHERENT, SIGNATURE_V0, SIGNATURE_V1, V0_COL_ADHERENT, V0_COL_CIN,
     V0_COL_IMAGE, V0_COL_NUM_FAMILLE, V1_COL_CIN, V1_COL_LIEN,
-    V1_COL_NUM_FAMILLE, construire_index_entetes, normaliser_entete,
-    normaliser_lien,
+    V1_COL_NUM_FAMILLE, VERSION_V0, VERSION_V1, construire_index_entetes,
+    normaliser_entete, normaliser_lien,
 )
 
-VERSION_V0 = "V0"
-VERSION_V1 = "V1"
 VERSION_INCONNUE = "Inconnue"
 
 

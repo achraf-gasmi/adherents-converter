@@ -1,17 +1,29 @@
 """
 core.ranking
 =============
-Cœur métier de la conversion (§4) : calcul du rang de chaque personne au sein
-de sa famille (0 = adhérent, 1 = conjoint toujours réservé, 2+ = enfants
-triés par âge avec départage déterministe des jumeaux), et vérifications
-de cohérence familiale qui nécessitent une vue d'ensemble sur la famille
-(filiation, doublons, rangs source incohérents). Opère sur des listes de
-dictionnaires (un dict = une ligne cible en cours de construction) portant
-les champs internes définis dans core.mapping.
+Cœur métier de la conversion (§4). Deux modes de calcul du rang, selon la
+version source :
+
+- V0 : aucun rang n'existe dans la source (le format ne porte pas cette
+  colonne) ; le rang est entièrement calculé (0 = adhérent, 1 = conjoint
+  toujours réservé, 2+ = enfants triés par âge avec départage déterministe
+  des jumeaux).
+- V1 : le rang fourni par la source est désormais conservé tel quel dans
+  l'export — décision métier validée après retour des utilisateurs : ne plus
+  corriger le rang source. Le module se contente de détecter et journaliser
+  les incohérences (famille sans adhérent, rangs dupliqués, rang réservé
+  porté par la mauvaise personne, ordre des enfants incohérent avec leur
+  âge...) sans jamais modifier la valeur exportée.
+
+Le module effectue aussi les vérifications de cohérence familiale qui
+nécessitent une vue d'ensemble sur la famille (filiation, doublons), quelle
+que soit l'origine du rang. Opère sur des listes de dictionnaires (un dict =
+une ligne cible en cours de construction) portant les champs internes
+définis dans core.mapping.
 """
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import date
 
 from core.anomalies import CollecteurAnomalies
@@ -19,7 +31,8 @@ from core.mapping import (
     F_CIN, F_CLIENT, F_COLONNE_SOURCE, F_DATE_AFFILIATION, F_DATE_NAISSANCE,
     F_FICHIER_SOURCE, F_GENDRE, F_INDEX_SOURCE, F_LIEN, F_LIGNE_SOURCE,
     F_NOM, F_NUM_FAMILLE, F_ONGLET_SOURCE, F_RANG, F_RANG_SOURCE, F_RIB,
-    LIEN_ADHERENT, LIEN_CONJOINT, LIEN_ENFANT, normaliser_lien,
+    F_VERSION_SOURCE, LIEN_ADHERENT, LIEN_CONJOINT, LIEN_ENFANT, VERSION_V1,
+    normaliser_lien,
 )
 
 AGE_MINIMUM_ADHERENT = 16
@@ -48,10 +61,31 @@ def _log(collecteur: CollecteurAnomalies, ligne: dict, *, code: str, champ_cible
     )
 
 
-def _traiter_famille(lignes_famille: list[dict], collecteur: CollecteurAnomalies) -> None:
-    """Assigne le rang de chaque personne d'une même famille (§4) et journalise
-    les anomalies liées au regroupement (adhérent multiple, conjoint multiple,
-    famille sans adhérent, lien manquant, doublons intra-famille)."""
+def _detecter_doublons_intra_famille(lignes_famille: list[dict], collecteur: CollecteurAnomalies) -> None:
+    """Même nom + même date de naissance dans une famille (§5.7). Ligne
+    conservée dans tous les cas : décision humaine, jamais de fusion."""
+    vus: dict[tuple, dict] = {}
+    for ligne in lignes_famille:
+        cle = (ligne[F_NOM] or "", ligne[F_DATE_NAISSANCE])
+        if cle[0] == "" and cle[1] is None:
+            continue
+        if cle in vus:
+            _log(
+                collecteur, ligne, code="DOUBLON_INTRA_FAMILLE",
+                message="Même nom et même date de naissance qu'une autre ligne de cette famille ; les deux lignes sont conservées.",
+            )
+        else:
+            vus[cle] = ligne
+
+
+# --------------------------------------------------------------------------
+# V0 : le rang n'existe pas dans la source, il est entièrement calculé.
+# --------------------------------------------------------------------------
+
+def _traiter_famille_v0(lignes_famille: list[dict], collecteur: CollecteurAnomalies) -> None:
+    """Assigne le rang de chaque personne d'une même famille V0 (§4) et
+    journalise les anomalies liées au regroupement (adhérent multiple,
+    conjoint multiple, famille sans adhérent, lien manquant)."""
 
     adherents: list[dict] = []
     conjoints: list[dict] = []
@@ -137,36 +171,148 @@ def _traiter_famille(lignes_famille: list[dict], collecteur: CollecteurAnomalies
         extra[F_RANG] = prochain_rang
         prochain_rang += 1
 
-    # Doublons intra-famille : même nom + même date de naissance (§5.7).
-    vus: dict[tuple, dict] = {}
-    for ligne in lignes_famille:
-        cle = (ligne[F_NOM] or "", ligne[F_DATE_NAISSANCE])
-        if cle[0] == "" and cle[1] is None:
-            continue
-        if cle in vus:
-            _log(
-                collecteur, ligne, code="DOUBLON_INTRA_FAMILLE",
-                message="Même nom et même date de naissance qu'une autre ligne de cette famille ; les deux lignes sont conservées.",
-            )
-        else:
-            vus[cle] = ligne
+    _detecter_doublons_intra_famille(lignes_famille, collecteur)
 
-    # Rang source incohérent (V1 uniquement ; le rang source n'est jamais
-    # repris, seulement comparé, pour objectiver l'écart documenté en §9-L3).
+
+# --------------------------------------------------------------------------
+# V1 : le rang source est désormais conservé tel quel (décision métier),
+# uniquement contrôlé et signalé, jamais corrigé.
+# --------------------------------------------------------------------------
+
+def _assigner_rang_source(ligne: dict, collecteur: CollecteurAnomalies) -> None:
+    brut = ligne.get(F_RANG_SOURCE)
+    if brut is None or (isinstance(brut, str) and brut.strip() == ""):
+        ligne[F_RANG] = None
+        _log(
+            collecteur, ligne, code="RANG_MANQUANT", champ_cible="Rang",
+            valeur_origine=brut, valeur_retenue=None,
+            message="Rang absent dans la source ; laissé vide (non recalculé).",
+        )
+        return
+    try:
+        ligne[F_RANG] = int(float(str(brut).strip()))
+    except (TypeError, ValueError):
+        ligne[F_RANG] = None
+        _log(
+            collecteur, ligne, code="RANG_MANQUANT", champ_cible="Rang",
+            valeur_origine=brut, valeur_retenue=None,
+            message="Rang illisible dans la source ; laissé vide (non recalculé).",
+        )
+
+
+def _traiter_famille_v1(lignes_famille: list[dict], collecteur: CollecteurAnomalies) -> None:
+    """Conserve le rang fourni par la source V1 tel quel : la valeur écrite
+    dans F_RANG est toujours la valeur source (éventuellement vide si
+    absente/illisible), jamais une valeur recalculée. Détecte et journalise
+    les incohérences sans jamais modifier le rang exporté."""
+
+    adherents: list[dict] = []
+    conjoints: list[dict] = []
+    enfants: list[dict] = []
+    autres: list[dict] = []
+
     for ligne in lignes_famille:
-        rang_source = ligne.get(F_RANG_SOURCE)
-        if rang_source is None:
-            continue
-        try:
-            rang_source_int = int(rang_source)
-        except (TypeError, ValueError):
-            continue
-        if ligne[F_RANG] is not None and rang_source_int != ligne[F_RANG]:
+        lien_brut = ligne[F_LIEN]
+        lien = normaliser_lien(lien_brut)
+        ligne[F_LIEN] = lien or ""
+        _assigner_rang_source(ligne, collecteur)
+        if lien == LIEN_ADHERENT:
+            adherents.append(ligne)
+        elif lien == LIEN_CONJOINT:
+            conjoints.append(ligne)
+        elif lien == LIEN_ENFANT:
+            enfants.append(ligne)
+        else:
+            autres.append(ligne)
             _log(
-                collecteur, ligne, code="RANG_RECALCULE", champ_cible="Rang",
-                valeur_origine=rang_source, valeur_retenue=ligne[F_RANG],
-                message="Le rang source ne correspond pas au rang recalculé ; le rang source n'est jamais repris tel quel.",
+                collecteur, ligne, code="LIEN_MANQUANT", champ_cible="Lien",
+                valeur_origine=lien_brut, valeur_retenue=None,
+                message="Lien vide ou non reconnu ; rang source conservé tel quel.",
             )
+
+    if not adherents:
+        _log(
+            collecteur, lignes_famille[0], code="FAMILLE_SANS_ADHERENT",
+            message="Aucune ligne avec Lien = Adhérent dans cette famille ; rangs source conservés tels quels.",
+        )
+    for supplementaire in adherents[1:]:
+        _log(
+            collecteur, supplementaire, code="ADHERENT_MULTIPLE", champ_cible="Rang",
+            valeur_origine=supplementaire[F_RANG], valeur_retenue=supplementaire[F_RANG],
+            message="Plusieurs lignes avec Lien = Adhérent dans cette famille ; rangs source conservés tels quels.",
+        )
+    for supplementaire in conjoints[1:]:
+        _log(
+            collecteur, supplementaire, code="CONJOINT_MULTIPLE", champ_cible="Rang",
+            valeur_origine=supplementaire[F_RANG], valeur_retenue=supplementaire[F_RANG],
+            message="Plusieurs lignes avec Lien = Conjoint dans cette famille ; rangs source conservés tels quels.",
+        )
+
+    # Cohérence Lien <-> Rang, sans jamais corriger la valeur exportée.
+    for ligne in adherents:
+        if ligne[F_RANG] is not None and ligne[F_RANG] != 0:
+            _log(
+                collecteur, ligne, code="RANG_INCOHERENT", champ_cible="Rang",
+                valeur_origine=ligne[F_RANG], valeur_retenue=ligne[F_RANG],
+                message="Lien = Adhérent mais Rang source différent de 0 ; valeur source conservée telle quelle.",
+            )
+    for ligne in conjoints:
+        if ligne[F_RANG] is not None and ligne[F_RANG] != 1:
+            _log(
+                collecteur, ligne, code="RANG_INCOHERENT", champ_cible="Rang",
+                valeur_origine=ligne[F_RANG], valeur_retenue=ligne[F_RANG],
+                message="Lien = Conjoint mais Rang source différent de 1 ; valeur source conservée telle quelle.",
+            )
+    for ligne in enfants + autres:
+        if ligne[F_RANG] in (0, 1):
+            role = ligne[F_LIEN] or "non reconnu"
+            _log(
+                collecteur, ligne, code="RANG_INCOHERENT", champ_cible="Rang",
+                valeur_origine=ligne[F_RANG], valeur_retenue=ligne[F_RANG],
+                message=f"Rang {ligne[F_RANG]} normalement réservé à l'adhérent/conjoint, incohérent avec Lien = {role} ; valeur source conservée telle quelle.",
+            )
+
+    # Rangs dupliqués au sein de la famille (le rang source n'étant plus
+    # corrigé, deux lignes peuvent désormais porter le même rang).
+    compte = Counter(l[F_RANG] for l in lignes_famille if l[F_RANG] is not None)
+    for ligne in lignes_famille:
+        if ligne[F_RANG] is not None and compte[ligne[F_RANG]] > 1:
+            _log(
+                collecteur, ligne, code="RANG_DUPLIQUE", champ_cible="Rang",
+                valeur_origine=ligne[F_RANG], valeur_retenue=ligne[F_RANG],
+                message=f"Le rang {ligne[F_RANG]} est porté par plusieurs lignes de cette famille ; valeurs source conservées telles quelles.",
+            )
+
+    # Ordre des enfants incohérent avec leur âge : indicatif uniquement,
+    # aucun réordonnancement n'est effectué.
+    enfants_avec_date_et_rang = [e for e in enfants if e[F_DATE_NAISSANCE] is not None and e[F_RANG] is not None]
+    if len(enfants_avec_date_et_rang) > 1:
+        par_rang = sorted(enfants_avec_date_et_rang, key=lambda e: e[F_RANG])
+        par_age = sorted(enfants_avec_date_et_rang, key=_cle_tri_enfant)
+        if [id(e) for e in par_rang] != [id(e) for e in par_age]:
+            for enfant in enfants_avec_date_et_rang:
+                _log(
+                    collecteur, enfant, code="RANG_ENFANTS_DESORDONNES", champ_cible="Rang",
+                    valeur_origine=enfant[F_RANG], valeur_retenue=enfant[F_RANG],
+                    message="L'ordre des rangs des enfants ne correspond pas à l'ordre de leurs dates de naissance ; rangs source conservés tels quels.",
+                )
+
+    # Jumeaux : signalement informatif uniquement, aucun départage n'est
+    # effectué puisque le rang source n'est plus modifié.
+    par_date: dict[date, list[dict]] = defaultdict(list)
+    for e in enfants:
+        if e[F_DATE_NAISSANCE] is not None:
+            par_date[e[F_DATE_NAISSANCE]].append(e)
+    for meme_date, groupe in par_date.items():
+        if len(groupe) > 1:
+            for enfant in groupe:
+                _log(
+                    collecteur, enfant, code="JUMEAUX_DEPARTAGES", champ_cible="Rang",
+                    valeur_origine=meme_date.strftime("%d/%m/%Y"),
+                    message="Plusieurs enfants nés le même jour ; rangs source conservés tels quels, ordre à vérifier manuellement.",
+                )
+
+    _detecter_doublons_intra_famille(lignes_famille, collecteur)
 
 
 def _verifier_dates_famille(lignes_famille: list[dict], collecteur: CollecteurAnomalies, date_reference: date) -> None:
@@ -222,7 +368,8 @@ def _age_en_annees(naissance: date, reference: date) -> int:
 
 def calculer_rangs(lignes: list[dict], collecteur: CollecteurAnomalies, date_reference: date | None = None) -> None:
     """Point d'entrée principal : regroupe `lignes` par famille (fichier +
-    onglet + N° Famille) et calcule le rang de chaque personne. Modifie
+    onglet + N° Famille) et détermine le rang de chaque personne — calculé
+    pour le V0 (§4), conservé tel quel pour le V1 (décision métier). Modifie
     `lignes` en place (champ F_RANG) et journalise les anomalies via
     `collecteur`. Les groupes sont traités dans un ordre stable pour que le
     résultat soit reproductible d'une exécution à l'autre.
@@ -236,7 +383,10 @@ def calculer_rangs(lignes: list[dict], collecteur: CollecteurAnomalies, date_ref
 
     for cle in sorted(groupes.keys()):
         lignes_famille = groupes[cle]
-        _traiter_famille(lignes_famille, collecteur)
+        if lignes_famille[0].get(F_VERSION_SOURCE) == VERSION_V1:
+            _traiter_famille_v1(lignes_famille, collecteur)
+        else:
+            _traiter_famille_v0(lignes_famille, collecteur)
         _verifier_dates_famille(lignes_famille, collecteur, date_reference)
 
 

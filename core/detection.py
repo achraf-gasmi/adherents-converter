@@ -6,7 +6,11 @@ format source V0 ("Export Familles", large) ou V1 (long), à partir de la
 signature en cellule A1 (§2 et §3). Effectue en un seul passage de lecture
 un état des lieux rapide (nombre de lignes/familles, présence d'images
 encodées, taux de CIN manquants) afin d'alimenter les bandeaux d'alerte de
-l'interface avant même la conversion complète.
+l'interface avant même la conversion complète. Fournit aussi
+`lire_lignes_donnees`, le lecteur de lignes utilisé pour la conversion
+elle-même : sa position dans la liste renvoyée doit rester alignée sur le
+numéro de ligne réel du fichier (§7.1, traçabilité), donc aucune ligne
+intermédiaire n'est retirée, même vide.
 """
 from __future__ import annotations
 
@@ -52,6 +56,28 @@ def _lire_en_tetes(feuille) -> list[object]:
 
 def _vide(v: object) -> bool:
     return v is None or str(v).strip() == ""
+
+
+def lire_lignes_donnees(contenu: bytes, nom_onglet: str) -> list[tuple]:
+    """Lit les lignes de données d'un onglet (à partir de la ligne 2 ; la
+    ligne 1 est l'en-tête). Ne retire QUE les lignes vides en toute fin de
+    feuille (artefact fréquent des exports Excel qui déclarent une plage
+    utilisée plus grande que le contenu réel) : une ligne vide au milieu des
+    données est conservée telle quelle, pour que la position de chaque ligne
+    dans la liste renvoyée reste alignée sur son numéro réel dans le fichier
+    Excel. `core.convert_v0`/`core.convert_v1` s'appuient sur cet alignement
+    pour calculer "Ligne source" (§7.1) ; le retirer romprait la
+    traçabilité de toutes les lignes suivantes.
+    """
+    classeur = openpyxl.load_workbook(BytesIO(contenu), read_only=True, data_only=True)
+    feuille = classeur[nom_onglet]
+    lignes = list(feuille.iter_rows(min_row=2, values_only=True))
+
+    derniere_non_vide = -1
+    for i, ligne in enumerate(lignes):
+        if any(c is not None and str(c).strip() != "" for c in ligne):
+            derniere_non_vide = i
+    return lignes[: derniere_non_vide + 1]
 
 
 def _analyser_donnees(feuille, version: str, index: dict[str, int]) -> tuple[int, int, bool, bool, float | None]:

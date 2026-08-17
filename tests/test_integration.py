@@ -2,18 +2,16 @@
 l'ensemble des fichiers de data/samples et vérifie les invariants du
 consolidé. Ignoré automatiquement si le dossier est vide (les fichiers
 sources ne sont pas nécessairement livrés avec le dépôt)."""
-import io
 import time
 from datetime import date
 from pathlib import Path
 
-import openpyxl
 import pytest
 
 from core.anomalies import CollecteurAnomalies
 from core.convert_v0 import convertir_v0
 from core.convert_v1 import convertir_v1
-from core.detection import VERSION_V0, VERSION_V1, detecter_classeur
+from core.detection import VERSION_V0, VERSION_V1, detecter_classeur, lire_lignes_donnees
 from core.mapping import (
     F_CIN, F_DATE_AFFILIATION, F_FICHIER_SOURCE, F_LIEN, F_NUM_FAMILLE,
     F_ONGLET_SOURCE, F_RANG, F_RIB, LIEN_CONJOINT,
@@ -31,15 +29,6 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def _lire_lignes(contenu: bytes, onglet: str) -> list[tuple]:
-    classeur = openpyxl.load_workbook(io.BytesIO(contenu), read_only=True, data_only=True)
-    feuille = classeur[onglet]
-    return [
-        ligne for ligne in feuille.iter_rows(min_row=2, values_only=True)
-        if any(c is not None and str(c).strip() != "" for c in ligne)
-    ]
-
-
 @pytest.fixture(scope="module")
 def resultat_corpus():
     collecteur = CollecteurAnomalies()
@@ -51,7 +40,7 @@ def resultat_corpus():
         for detection in detecter_classeur(contenu, fichier.name):
             if detection.erreur or detection.version not in (VERSION_V0, VERSION_V1):
                 continue
-            lignes_source = _lire_lignes(contenu, detection.nom_onglet)
+            lignes_source = lire_lignes_donnees(contenu, detection.nom_onglet)
             if detection.version == VERSION_V0:
                 lignes = convertir_v0(lignes_source, detection.en_tetes_bruts, fichier.name, detection.nom_onglet, collecteur)
             else:

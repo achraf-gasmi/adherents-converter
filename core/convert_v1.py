@@ -53,16 +53,21 @@ def convertir_v1(
     supprimer_lignes_fantomes: bool = True,
     completer_cin: bool = True,
     vider_cin_factices: bool = True,
+    ligne_entete: int = 1,
 ) -> list[dict]:
     """Convertit les lignes brutes d'un onglet V1 (une ligne = une personne)
     en lignes cible. `lignes_source` doit commencer à la première ligne de
-    DONNÉES (l'en-tête est fourni à part, ligne 1).
+    DONNÉES (l'en-tête est fourni à part). `ligne_entete` indique le numéro
+    de ligne Excel (1-based) où se trouve effectivement l'en-tête — 1 par
+    défaut, mais certains exports réels ont une ou plusieurs lignes vides
+    avant l'en-tête (§7.1) ; ce décalage doit être répercuté sur "Ligne
+    source" pour que la traçabilité reste exacte.
     """
     index = construire_index_entetes(en_tetes)
     resultats: list[dict] = []
 
     for position, ligne in enumerate(lignes_source):
-        ligne_source_num = position + 2
+        ligne_source_num = position + ligne_entete + 1
 
         client = normaliser_entete(_valeur(ligne, index, V1_COL_CLIENT)) or ""
         num_famille_brut = _valeur(ligne, index, V1_COL_NUM_FAMILLE)

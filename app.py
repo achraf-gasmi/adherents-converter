@@ -73,13 +73,13 @@ def _executer_conversion(
 
         detection = detections_par_cle[(fichier, onglet)]
         contenu = contenus[fichier]
-        lignes_source = lire_lignes_donnees(contenu, onglet)
+        lignes_source = lire_lignes_donnees(contenu, onglet, ligne_entete=detection.ligne_entete)
 
         if version == VERSION_V0:
             lignes = convertir_v0(
                 lignes_source, detection.en_tetes_bruts, fichier, onglet, collecteur,
                 uppercase_noms=options["uppercase_noms"], completer_cin=options["completer_cin"],
-                vider_cin_factices=options["vider_cin_factices"],
+                vider_cin_factices=options["vider_cin_factices"], ligne_entete=detection.ligne_entete,
             )
         elif version == VERSION_V1:
             lignes = convertir_v1(
@@ -87,6 +87,7 @@ def _executer_conversion(
                 uppercase_noms=options["uppercase_noms"],
                 supprimer_lignes_fantomes=options["supprimer_lignes_fantomes"],
                 completer_cin=options["completer_cin"], vider_cin_factices=options["vider_cin_factices"],
+                ligne_entete=detection.ligne_entete,
             )
         else:
             continue

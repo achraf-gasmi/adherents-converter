@@ -10,12 +10,10 @@ et l'afficher.
 """
 from __future__ import annotations
 
-import io
 import zipfile
 from datetime import date
 from io import BytesIO
 
-import openpyxl
 import pandas as pd
 import streamlit as st
 
@@ -25,7 +23,10 @@ from core.anomalies import (
 )
 from core.convert_v0 import convertir_v0
 from core.convert_v1 import convertir_v1
-from core.detection import VERSION_INCONNUE, VERSION_V0, VERSION_V1, OngletDetecte, detecter_classeur
+from core.detection import (
+    VERSION_INCONNUE, VERSION_V0, VERSION_V1, OngletDetecte, detecter_classeur,
+    lire_lignes_donnees,
+)
 from core.export import calculer_resume, construire_fichier_cible, construire_rapport_anomalies
 from core.mapping import (
     F_CIN, F_CLIENT, F_DATE_AFFILIATION, F_DATE_NAISSANCE, F_FICHIER_SOURCE,
@@ -52,16 +53,6 @@ def _nom_base(nom_fichier: str) -> str:
     return nom_fichier.rsplit(".", 1)[0]
 
 
-def _lire_lignes_donnees(contenu: bytes, nom_onglet: str) -> list[tuple]:
-    classeur = openpyxl.load_workbook(BytesIO(contenu), read_only=True, data_only=True)
-    feuille = classeur[nom_onglet]
-    lignes = []
-    for ligne in feuille.iter_rows(min_row=2, values_only=True):
-        if any(c is not None and str(c).strip() != "" for c in ligne):
-            lignes.append(ligne)
-    return lignes
-
-
 # --------------------------------------------------------------------------
 # Pipeline de conversion
 # --------------------------------------------------------------------------
@@ -82,7 +73,7 @@ def _executer_conversion(
 
         detection = detections_par_cle[(fichier, onglet)]
         contenu = contenus[fichier]
-        lignes_source = _lire_lignes_donnees(contenu, onglet)
+        lignes_source = lire_lignes_donnees(contenu, onglet)
 
         if version == VERSION_V0:
             lignes = convertir_v0(

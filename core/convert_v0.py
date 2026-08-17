@@ -144,10 +144,15 @@ def convertir_v0(
     uppercase_noms: bool = True,
     completer_cin: bool = True,
     vider_cin_factices: bool = True,
+    ligne_entete: int = 1,
 ) -> list[dict]:
     """Convertit les lignes brutes d'un onglet V0 (une ligne = une famille)
     en lignes cible (une ligne = une personne). `lignes_source` doit
     commencer à la première ligne de DONNÉES (l'en-tête est fourni à part).
+    `ligne_entete` indique le numéro de ligne Excel (1-based) où se trouve
+    effectivement l'en-tête — 1 par défaut, mais certains exports réels ont
+    une ou plusieurs lignes vides avant l'en-tête (§7.1) ; ce décalage doit
+    être répercuté sur "Ligne source" pour que la traçabilité reste exacte.
     """
     index = construire_index_entetes(en_tetes)
     colonnes_reconnues = set(index.keys())
@@ -156,7 +161,7 @@ def convertir_v0(
     resultats: list[dict] = []
 
     for position, ligne in enumerate(lignes_source):
-        ligne_source_num = position + 2  # +1 pour l'en-tête, +1 car position est 0-based
+        ligne_source_num = position + ligne_entete + 1  # +1 pour l'en-tête, +1 car position est 0-based
         client = normaliser_entete(_valeur(ligne, index, V0_COL_CLIENT)) or ""
         num_famille_brut = _valeur(ligne, index, V0_COL_NUM_FAMILLE)
         num_famille = str(num_famille_brut).strip() if not _vide(num_famille_brut) else ""

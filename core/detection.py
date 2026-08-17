@@ -3,11 +3,15 @@ core.detection
 ===============
 Détecte, pour chaque onglet d'un classeur Excel importé, s'il s'agit du
 format source V0 ("Export Familles", large) ou V1 (long), à partir de la
-signature en cellule A1 (§2 et §3). Effectue en un seul passage de lecture
-un état des lieux rapide (nombre de lignes/familles, présence d'images
-encodées, taux de CIN manquants) afin d'alimenter les bandeaux d'alerte de
-l'interface avant même la conversion complète. Fournit aussi
-`lire_lignes_donnees`, le lecteur de lignes utilisé pour la conversion
+signature en cellule A1 (§2 et §3). L'en-tête n'est pas supposé être
+obligatoirement en ligne 1 : certains exports réels comportent une ou
+plusieurs lignes vides avant l'en-tête (ex. ASSETS.xlsx / "Export Adherent +
+Beneficiaire") ; la détection recherche donc la signature sur les premières
+lignes de la feuille avant de conclure à un format inconnu. Effectue en un
+seul passage de lecture un état des lieux rapide (nombre de lignes/familles,
+présence d'images encodées, taux de CIN manquants) afin d'alimenter les
+bandeaux d'alerte de l'interface avant même la conversion complète. Fournit
+aussi `lire_lignes_donnees`, le lecteur de lignes utilisé pour la conversion
 elle-même : sa position dans la liste renvoyée doit rester alignée sur le
 numéro de ligne réel du fichier (§7.1, traçabilité), donc aucune ligne
 intermédiaire n'est retirée, même vide.
@@ -28,6 +32,12 @@ from core.mapping import (
 
 VERSION_INCONNUE = "Inconnue"
 
+# Nombre maximal de lignes examinées en tête de feuille à la recherche de la
+# signature d'en-tête (§2/§3). Borné pour rester rapide et éviter qu'une
+# ligne de données ne soit prise à tort pour un en-tête sur un fichier sans
+# en-tête reconnaissable.
+MAX_LIGNES_RECHERCHE_ENTETE = 10
+
 
 @dataclass
 class OngletDetecte:
@@ -38,6 +48,7 @@ class OngletDetecte:
     version: str
     en_tetes: list[str] = field(default_factory=list)
     en_tetes_bruts: list[object] = field(default_factory=list)
+    ligne_entete: int = 1
     nb_lignes: int = 0
     nb_familles: int = 0
     image_non_vide: bool = False
@@ -46,32 +57,44 @@ class OngletDetecte:
     erreur: str | None = None
 
 
-def _lire_en_tetes(feuille) -> list[object]:
-    try:
-        premiere_ligne = next(feuille.iter_rows(min_row=1, max_row=1, values_only=True))
-    except StopIteration:
-        return []
-    return list(premiere_ligne)
+def _localiser_entete(feuille) -> tuple[int, list[object]]:
+    """Cherche, parmi les `MAX_LIGNES_RECHERCHE_ENTETE` premières lignes de
+    la feuille, la première dont la première cellule correspond à une
+    signature connue (§2/§3). Renvoie (numéro de ligne 1-based, valeurs de
+    cette ligne). Si aucune signature n'est trouvée, retombe sur la ligne 1
+    (comportement précédent, pour un format réellement inconnu)."""
+    premiere_ligne: list[object] = []
+    for i, ligne in enumerate(
+        feuille.iter_rows(min_row=1, max_row=MAX_LIGNES_RECHERCHE_ENTETE, values_only=True), start=1
+    ):
+        valeurs = list(ligne)
+        if i == 1:
+            premiere_ligne = valeurs
+        signature = normaliser_entete(valeurs[0]) if valeurs else ""
+        if signature in (SIGNATURE_V0, SIGNATURE_V1):
+            return i, valeurs
+    return 1, premiere_ligne
 
 
 def _vide(v: object) -> bool:
     return v is None or str(v).strip() == ""
 
 
-def lire_lignes_donnees(contenu: bytes, nom_onglet: str) -> list[tuple]:
-    """Lit les lignes de données d'un onglet (à partir de la ligne 2 ; la
-    ligne 1 est l'en-tête). Ne retire QUE les lignes vides en toute fin de
-    feuille (artefact fréquent des exports Excel qui déclarent une plage
-    utilisée plus grande que le contenu réel) : une ligne vide au milieu des
-    données est conservée telle quelle, pour que la position de chaque ligne
-    dans la liste renvoyée reste alignée sur son numéro réel dans le fichier
-    Excel. `core.convert_v0`/`core.convert_v1` s'appuient sur cet alignement
-    pour calculer "Ligne source" (§7.1) ; le retirer romprait la
-    traçabilité de toutes les lignes suivantes.
+def lire_lignes_donnees(contenu: bytes, nom_onglet: str, ligne_entete: int = 1) -> list[tuple]:
+    """Lit les lignes de données d'un onglet (à partir de la ligne suivant
+    `ligne_entete`, qui vaut 1 par défaut). Ne retire QUE les lignes vides en
+    toute fin de feuille (artefact fréquent des exports Excel qui déclarent
+    une plage utilisée plus grande que le contenu réel) : une ligne vide au
+    milieu des données est conservée telle quelle, pour que la position de
+    chaque ligne dans la liste renvoyée reste alignée sur son numéro réel
+    dans le fichier Excel. `core.convert_v0`/`core.convert_v1` s'appuient sur
+    cet alignement (combiné à `ligne_entete`) pour calculer "Ligne source"
+    (§7.1) ; le retirer romprait la traçabilité de toutes les lignes
+    suivantes.
     """
     classeur = openpyxl.load_workbook(BytesIO(contenu), read_only=True, data_only=True)
     feuille = classeur[nom_onglet]
-    lignes = list(feuille.iter_rows(min_row=2, values_only=True))
+    lignes = list(feuille.iter_rows(min_row=ligne_entete + 1, values_only=True))
 
     derniere_non_vide = -1
     for i, ligne in enumerate(lignes):
@@ -80,10 +103,11 @@ def lire_lignes_donnees(contenu: bytes, nom_onglet: str) -> list[tuple]:
     return lignes[: derniere_non_vide + 1]
 
 
-def _analyser_donnees(feuille, version: str, index: dict[str, int]) -> tuple[int, int, bool, bool, float | None]:
-    """Un seul passage sur les lignes de données pour calculer : nombre de
-    lignes non vides, nombre de familles, présence d'image non vide (V0),
-    absence de colonne CIN, et pourcentage d'adhérents sans CIN."""
+def _analyser_donnees(feuille, version: str, index: dict[str, int], ligne_entete: int) -> tuple[int, int, bool, bool, float | None]:
+    """Un seul passage sur les lignes de données (à partir de la ligne
+    suivant `ligne_entete`) pour calculer : nombre de lignes non vides,
+    nombre de familles, présence d'image non vide (V0), absence de colonne
+    CIN, et pourcentage d'adhérents sans CIN."""
     nb_lignes = 0
     familles: set[str] = set()
     image_non_vide = False
@@ -94,7 +118,7 @@ def _analyser_donnees(feuille, version: str, index: dict[str, int]) -> tuple[int
         i_image = index.get(V0_COL_IMAGE)
         i_cin = index.get(V0_COL_CIN)
         cin_absente = i_cin is None
-        for ligne in feuille.iter_rows(min_row=2, values_only=True):
+        for ligne in feuille.iter_rows(min_row=ligne_entete + 1, values_only=True):
             if not any(c is not None and str(c).strip() != "" for c in ligne):
                 continue
             nb_lignes += 1
@@ -118,7 +142,7 @@ def _analyser_donnees(feuille, version: str, index: dict[str, int]) -> tuple[int
     i_cin = index.get(V1_COL_CIN)
     cin_absente = i_cin is None
     nb_adherents = 0
-    for ligne in feuille.iter_rows(min_row=2, values_only=True):
+    for ligne in feuille.iter_rows(min_row=ligne_entete + 1, values_only=True):
         if not any(c is not None and str(c).strip() != "" for c in ligne):
             continue
         nb_lignes += 1
@@ -158,7 +182,7 @@ def detecter_classeur(contenu: bytes, nom_fichier: str) -> list[OngletDetecte]:
     for nom_onglet in classeur.sheetnames:
         try:
             feuille = classeur[nom_onglet]
-            en_tetes_bruts = _lire_en_tetes(feuille)
+            ligne_entete, en_tetes_bruts = _localiser_entete(feuille)
             en_tetes = [normaliser_entete(v) for v in en_tetes_bruts]
             signature = en_tetes[0] if en_tetes else ""
             if signature == SIGNATURE_V0:
@@ -172,17 +196,17 @@ def detecter_classeur(contenu: bytes, nom_fichier: str) -> list[OngletDetecte]:
                 resultats.append(
                     OngletDetecte(
                         nom_fichier=nom_fichier, nom_onglet=nom_onglet, version=version,
-                        en_tetes=en_tetes, en_tetes_bruts=en_tetes_bruts,
+                        en_tetes=en_tetes, en_tetes_bruts=en_tetes_bruts, ligne_entete=ligne_entete,
                     )
                 )
                 continue
 
             index = construire_index_entetes(en_tetes_bruts)
-            nb_lignes, nb_familles, image_non_vide, cin_absente, pct_sans_cin = _analyser_donnees(feuille, version, index)
+            nb_lignes, nb_familles, image_non_vide, cin_absente, pct_sans_cin = _analyser_donnees(feuille, version, index, ligne_entete)
             resultats.append(
                 OngletDetecte(
                     nom_fichier=nom_fichier, nom_onglet=nom_onglet, version=version,
-                    en_tetes=en_tetes, en_tetes_bruts=en_tetes_bruts,
+                    en_tetes=en_tetes, en_tetes_bruts=en_tetes_bruts, ligne_entete=ligne_entete,
                     nb_lignes=nb_lignes, nb_familles=nb_familles,
                     image_non_vide=image_non_vide, cin_absente=cin_absente, pct_sans_cin=pct_sans_cin,
                 )
